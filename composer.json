@@ -1,0 +1,6 @@
+{
+  "name": "fields",
+   "require": {
+        "myabakus/teamworkpm": "dev-master"
+    }  
+}
