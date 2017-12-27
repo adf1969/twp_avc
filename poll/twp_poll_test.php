@@ -9,7 +9,10 @@ require_once('../twp_util.php');
 use \TeamWorkPm\Factory as TeamWorkPm;
 use \TeamWorkPm\Auth;
 use \avc\Factory as Avc;
+use Monolog\Logger;
+use Monolog\Handler\StreamHandler;
 
+$old_error_handler = set_error_handler("avcErrorHandler");
 
 wdebug("=========================================================");
 wdebug("| BEGIN - twp_poll_test.php                             |");
@@ -182,9 +185,11 @@ function testGetAvcTaskAndComments() {
 }
 
 
-//testGetAvcTask();
+testGetAvcTask();
 function testGetAvcTask() {
   $taskId = 7529249;
+  $taskId = 7529247;
+  $taskId = 7535407;
   $avcTask = Avc::getTask($taskId);
   wdebug("twp_poll_test: avcTask: ", $avcTask);
 }
@@ -193,6 +198,7 @@ function testGetAvcTask() {
 function testGetTaskRecentComment() {
 try {
     $taskId = 7529249;
+    $taskId = 7529247;
     $avcTask = Avc::getTask($taskId);
     $comment = $avcTask->getMostRecentResponsibleComment();  
     wdebug("twp_poll_test: Most Recent Responsible Comments: ", $comment);
@@ -293,7 +299,7 @@ function testAddTagsToTask() {
   
 }
 
-testRemoveTagsToTask();
+//testRemoveTagsToTask();
 function testRemoveTagsToTask() {
   /* @var $avcTask \avc\Task */
   $taskId = 7529249;
@@ -305,6 +311,67 @@ function testRemoveTagsToTask() {
   addDefaultNSTags();
   $avcTask->removeTag("/NeedsStatus/");
   
+}
+
+//testAddStatusLevels();
+function testAddStatusLevels() {
+  /* @var $avcTask \avc\Task */
+  $taskId = 7529249;
+  $avcTask = Avc::getTask($taskId);
+  $avcTask->addStatusTag();
+}
+
+//testRemoveStatusLevels();
+function testRemoveStatusLevels() {
+  /* @var $avcTask \avc\Task */
+  $taskId = 7529249;
+  $avcTask = Avc::getTask($taskId);
+  $avcTask->removeStatusTag();
+}
+
+//testGetTaskList();
+function testGetTaskList() {
+  /* @var $avcTaskList \avc\Task_List */
+  wdebug("twp_poll_test: testGetTaskList", "");
+  $taskListId = 743679;  
+  $avcTaskList = Avc::getTaskList($taskListId);  
+  wdebug("twp_poll_test: avcTaskList: ", $avcTaskList);
+  
+}
+
+//testGetTaskListFromTask();
+function testGetTaskListFromTask() {
+  /* @var $avcTask \avc\Task */
+  wdebug("twp_poll_test: testGetTaskListFromTask", "");
+  $taskId = 7529249;
+  $taskId = 7529247;
+  $avcTask = Avc::getTask($taskId);
+  $avcTaskList = $avcTask->getTaskList();
+  wdebug("twp_poll_test: avcTaskList: ", $avcTaskList);
+  
+}
+
+//testGetMilestone();
+function testGetMilestone() {
+  /* @var $avcMilestone \avc\Milestone */
+  wdebug("twp_poll_test: testGetMilestone", "");
+  $milestoneId = 280739;  
+  $avcMilestone = Avc::getMilestone($milestoneId);  
+  wdebug("twp_poll_test: avcMilestone: ", $avcMilestone);  
+}
+
+//testGetTaskPriority();
+function testGetTaskPriority() {
+  /* @var $avcTask \avc\Task */
+  // We get the TaskPriority from the Task RF level, or from the Milestone RF level
+  wdebug("twp_poll_test: testGetTaskPriority", "");
+  //$taskId = 7529249;
+  //$taskId = 7529247;
+  $taskId = 7535407;    // No local priority, have to check Milestone
+  $taskId = 7529229;    
+  $avcTask = Avc::getTask($taskId);
+  $rfLevel = $avcTask->getTaskPriority();  
+  wdebug("twp_poll_test: rfLevel: ", $rfLevel);  
 }
 
 wdebug("|                                                       |");

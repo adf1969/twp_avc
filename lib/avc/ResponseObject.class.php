@@ -79,7 +79,7 @@ class ResponseObject extends \TeamWorkPm\Response\Model {
     $retData = null;
     foreach ($data as $k => $d) {
       switch ($k) {
-        case 'projects':
+        case 'projects':  // Array of Projects
           // convert all sub-elements to array of avc\Project
           $retData = [];
           foreach ($d as $project) {
@@ -89,14 +89,14 @@ class ResponseObject extends \TeamWorkPm\Response\Model {
           $processed = true;
           break;
           
-        case 'project':
+        case 'project': // Project
           // convert sub-element to avc\Project
           $avcProject = Avc::build('Project', $d, $headers);
           $retData = $avcProject;
           $processed = true;          
           break;
         
-        case 'comments':
+        case 'comments':  // Comment
           // convert all sub-elements to array of avc\Comment          
           $retData = [];
           foreach ($d as $comment) {
@@ -108,23 +108,35 @@ class ResponseObject extends \TeamWorkPm\Response\Model {
           $processed = true;
           break;
           
-        case 'todoItem':
+        case 'todoItem':  // Task
           // convert sub-element to avc\Task
           $avcTask = Avc::build('Task', $d, $headers);
           $retData = $avcTask;
           $processed = true;
           break;
         
-        case 'todoItems':          
+        case 'todoItems': // Array of Tasks
           // convert sub-elements to array of avc\Task
-          //TODO Finish code in ResponseObject to handle todoItems/task lists
           $retData = [];
           foreach ($d as $task) {
             $avcTask = Avc::build('Task', $task, $headers);
             $retData[] = $avcTask;
           }
+          $processed = true;          
+          break;
+
+        case 'todoList': // Task_List Object - NOT the same as Array of Tasks
+          // convert sub-element to avc\Task_List
+          $avcTaskList = Avc::build('Task_List', $d, $headers);
+          $retData = $avcTaskList;
           $processed = true;
-          
+          break;
+
+        case 'milestone': // Milestone Object
+          // convert sub-element to avc\Milestone
+          $avcMilestone = Avc::build('Milestone', $d, $headers);
+          $retData = $avcMilestone;
+          $processed = true;
           break;
         
         default:
@@ -145,16 +157,21 @@ class ResponseObject extends \TeamWorkPm\Response\Model {
   //  ->startDate (which will be a string) but we will also have
   //  ->startDate_DT (which will be a DateTime object in LOCAL tz)
   // Taken from \Response\JSON.php
-  protected static function camelizeObject($source)
-  {
-      $destination = new ArrayObject([], ArrayObject::ARRAY_AS_PROPS);
-      foreach ($source as $key => $value) {
+  protected static function camelizeObject($source)  {      
+      $destination = new ArrayObject([], ArrayObject::ARRAY_AS_PROPS);     
+      if (is_null($source) || (is_array($source) && count($source) == 0 )) {
+        return $destination;
+      }
+      try {
+        foreach ($source as $key => $value) {
+//          wdebug("camelizeObject. key = ", $key);
+//          wdebug("camelizeObject. value = ", $value);
           if (ctype_upper($key)) {
-              $key = strtolower($key);
+            $key = strtolower($key);
           }
           $key = Str::camel($key);
           $destination->$key = is_scalar($value) ?
-                                      $value : self::camelizeObject($value);
+              $value : self::camelizeObject($value);
           list($objType, $objVal) = self::getSpecialValue($key, $value);
           switch ($objType) {
             case 'Date':
@@ -163,10 +180,16 @@ class ResponseObject extends \TeamWorkPm\Response\Model {
               break;
             case 'DateTime':
               $key_special = $key . "_DT";
-              $destination->$key_special = $objVal;              
+              $destination->$key_special = $objVal;
+
               break;
           }
+        }
+      } catch (Exception $exc) {        
+        wdebug("** Exception: ", $exc);
+        wdebug("** camelizeObject source = ", $source);
       }
+
       return $destination;
   }  
   protected static function getSpecialValue($key, $value) {

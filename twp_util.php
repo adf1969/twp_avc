@@ -9,6 +9,7 @@ ini_set('max_input_time', 10003);
 use \TeamWorkPm\Factory as TeamWorkPm;
 use \TeamWorkPm\Auth;
 use \avc\Factory as Avc;
+use \avc\Config as Cfg;
 
 //require_once __DIR__ . '/lib/Factory.class.php';
 //require_once __DIR__ . '/lib/Task.class.php';
@@ -18,6 +19,7 @@ use \avc\Factory as Avc;
 const API_KEY = 'twp_3A4MaLtgRCEllViHO9ShCEBms3Ej';
 const API_URL = 'http://avctw.teamwork.com/';
 const ADF_USERID = '153910';
+const WH_TOKEN = 'AvcToken625';
 
 // <editor-fold defaultstate="collapsed" desc="Autoloader"> ------------------\\
 
@@ -51,6 +53,11 @@ spl_autoload_register('twpAutoload');
     
 // </editor-fold> Autoloader -------------------------------------------------\\
 
+// <editor-fold defaultstate="collapsed" desc="Logging - Monolog"> ------------------\\
+
+
+// </editor-fold> Logging - Monolog -------------------------------------------------\\
+
 // <editor-fold defaultstate="collapsed" desc="Security"> ------------------\\
 
 /**
@@ -61,7 +68,7 @@ spl_autoload_register('twpAutoload');
  * @param type $http_signature
  */
 function isPayloadValid($wh_payload, $http_signature) {
-  $token = "ThisIsMyToken";
+  $token = WH_TOKEN;
   $wh_checksum = hash_hmac('sha256', $wh_payload, $token);
   return $wh_checksum == $http_signature;  
 }
@@ -90,9 +97,9 @@ $defTagsRF = array(
 
 // NeedsStatus Tags
 $defTagsNS = array(
-  'NeedsStatus1' => ['color' => '#f4bd38', 'id' => null], //Mustard
-  'NeedsStatus2' => ['color' => '#f78234', 'id' => null], //Orange
-  'NeedsStatus3' => ['color' => '#d84640', 'id' => null], //Red
+  \avc\Task::$statusTagPrefix . '1' => ['color' => '#f4bd38', 'id' => null], //Mustard
+  \avc\Task::$statusTagPrefix . '2' => ['color' => '#f78234', 'id' => null], //Orange
+  \avc\Task::$statusTagPrefix . '3' => ['color' => '#d84640', 'id' => null], //Red
 );
 
 getConfigSettings();
@@ -126,6 +133,8 @@ function getConfigSettings() {
   }
       
   wdebug("getConfigSettings", $cfgFile);
+  Cfg::Log()->info('getConfigSettings', ['cfgFile' => $cfgFile]);
+  //$log->info('getConfigSettings', $cfgFile);
   
   if (($handle = fopen($cfgFile, "r")) !== FALSE) {
       $rowNum = 0;
@@ -249,6 +258,23 @@ function updateConfigSettingsFile($ssData) {
 // </editor-fold> Config Settings -------------------------------------------------\\
 
 
+// <editor-fold defaultstate="collapsed" desc="Error Handler"> ------------------\\
+
+function avcErrorHandler($errno, $errstr, $errfile, $errline) {
+  wdebug("Fatal Error -", "------------------------------------");
+  wdebug("Fatal Error - No: ", $errno);
+  wdebug("Fatal Error - String: ", $errstr);
+  wdebug("Fatal Error - File: ", $errfile);
+  wdebug("Fatal Error - Line: ", $errline);
+  //wdebug("Fatal Error - Backtrace", debug_backtrace());
+  wdebug("Fatal Error -", "------------------------------------");
+  
+  http_response_code(200);
+  return true;
+}
+
+// </editor-fold> Error Handler -------------------------------------------------\\
+
 // <editor-fold defaultstate="collapsed" desc="TWP Lib Helper Functions"> ------------------\\
 
 // Static Vars -----------------------------------------------------------------
@@ -342,6 +368,43 @@ function getRFTagIds() {
 
 // </editor-fold> TWP Lib Helper Functions -------------------------------------------------\\
 
+// <editor-fold defaultstate="collapsed" desc="TWP Webhook Processing"> ------------------\\
+
+function twpHook_CommentCreated($wh_data) {  
+  try {
+    $eventObj = $wh_data->eventCreator;
+    $comObj = $wh_data->comment;
+
+
+    $objType = $comObj->objectType;
+    $objId = $comObj->objectId;
+    switch ($objType) {
+      case 'task':
+        // Comment added to a task
+        $avcTask = Avc::getTask($objId);
+        $avcTask->onCommentCreated($wh_data, $comObj);
+        break;
+    }
+  } catch (Exception $exc) {
+    wdebug("Caught Exception: ", $exc);
+  }
+}
+
+function twpHook_TaskCreated($wh_data) {
+  $eventObj = $wh_data->eventCreator;
+  $taskObj = $wh_data->task;
+  $taskListObj = $wh_data->taskList;
+}
+
+function twpHook_TaskUpdated($wh_data) {
+  $eventObj = $wh_data->eventCreator;
+  $taskObj = $wh_data->task;
+  $taskListObj = $wh_data->taskList;
+}
+
+
+// </editor-fold> TWP Webhook Processing -------------------------------------------------\\
+
 
 // <editor-fold defaultstate="collapsed" desc="String Handling"> ------------------\\
 function beginsWith($haystack, $needle) {
@@ -356,7 +419,7 @@ function isRegularExpression($string) {
   set_error_handler(function() {}, E_WARNING);
   $isRegularExpression = preg_match($string, "") !== FALSE;
   restore_error_handler();
-  return isRegularExpression;
+  return $isRegularExpression;
 }
 
 // </editor-fold> String Handling -------------------------------------------------\\
@@ -662,8 +725,6 @@ function getTotalInterval($interval, $type){
 
 // <editor-fold defaultstate="collapsed" desc="Debug"> ------------------\\
 
-// </editor-fold> Debug -------------------------------------------------\\
-
 function wdebug($desc, $var = "") {
   global $debug, $debug_file;
   if ($debug) {
@@ -671,6 +732,13 @@ function wdebug($desc, $var = "") {
     $str_out =  $desc . ": " . print_r($var, true) . "\n";    
     file_put_contents($debug_file, $str_date . $str_out, FILE_APPEND | LOCK_EX);    
     file_put_contents('php://stderr', $str_out);
+    
+    // Also send debug to Logger
+    Cfg::Log('wdebug')->debug($desc, ['var' => $var]);
   }
 }
+
+// </editor-fold> Debug -------------------------------------------------\\
+
+
 

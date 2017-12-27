@@ -100,6 +100,18 @@ class Factory
     return $avcTaskResp->getObj();
   }
   
+  static public function getTaskList($taskListId) {
+    $taskListObj = self::build('Task_List');
+    $avcTaskListResp = $taskListObj->get($taskListId);
+    return $avcTaskListResp->getObj();
+  }
+  
+  static public function getMilestone($milestoneId) {
+    $milestoneObj = self::build('Milestone');
+    $avcMilestoneResp = $milestoneObj->get($milestoneId);
+    return $avcMilestoneResp->getObj();
+  }  
+  
   static public function getProjects($catName, $status = 'ACTIVE', $filter = []) {
     /* @var $projObj \avc\Project */
     if ($catId = getProjectCategoryId($catName)) {
@@ -131,10 +143,10 @@ class Factory
     //$newTag->action = $action;
 
     if ($replaceExistingTags) {
-      $tags['replaceExistingTags'] = true;
+      $tags['tags']['replaceExistingTags'] = true;
     }
     if ($removeProvidedTags) {
-      $tags['removeExistingTags'] = false;
+      $tags['tags']['removeProvidedTags'] = true;
     }
     
     $resp = $newTag->save($tags);

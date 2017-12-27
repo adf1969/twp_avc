@@ -1,6 +1,7 @@
 {
   "name": "fields",
    "require": {
-        "myabakus/teamworkpm": "dev-master"
+        "myabakus/teamworkpm": "dev-master",
+        "monolog/monolog": ">=1.2.3"
     }  
 }

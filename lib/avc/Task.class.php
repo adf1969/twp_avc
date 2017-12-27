@@ -7,12 +7,15 @@ use \DateTime;
 
 
 /**
- * Description of AvcTask
+ * Description of Avc\Task
  *
  * @author fields
  */
 class Task extends \TeamWorkPm\Task {
-    
+  static public $statusTagPrefix = "NeedsStatus";
+  static public $rfTagPrefix = "RF";
+  static public $rfNone = -1;
+  
   public function getComments($pageSize = 100) {
     $taskId = $this->id;
     $avcComment = Avc::build('Comment\Task');    
@@ -25,8 +28,11 @@ class Task extends \TeamWorkPm\Task {
     
     // get ALL the comments
     $taskId = $this->id;
-    $comments = $this->getComments(100);    
+    $commResp = $this->getComments(100);   
+    $comments = $commResp->toArray();
+    //wdebug("getResponsibleComments ALL: ", $comments);    
     $respIds = explode(",", $this->responsiblePartyId);
+    wdebug("getResponsibleComments respPartyId: ", $this->responsiblePartyId);
     
     // Now remove ALL the ones that aren't made by the Task Responsible User(s)
     $i = 0;
@@ -42,7 +48,8 @@ class Task extends \TeamWorkPm\Task {
       }
       $i++;
     }
-    return $comments;
+    //wdebug("getResponsibleComments Resp Only: ", $comments);    
+    return array_values($comments);
   }
 
 /**
@@ -52,7 +59,8 @@ class Task extends \TeamWorkPm\Task {
    */
   public function getCommentsByUser($user_id, $pageSize = 100, $page = 0) {
     // get ALL the comments
-    $comments = $this->getComments($pageSize);
+    $commResp = $this->getComments($pageSize);
+    $comments = $commResp->toArray();
     
     // Now remove ALL the ones that aren't made by User $user_id
     $i = 0;
@@ -68,7 +76,7 @@ class Task extends \TeamWorkPm\Task {
       }
       $i++;
     }
-    return $comments;
+    return array_values($comments);
   }  
 
   
@@ -91,10 +99,10 @@ class Task extends \TeamWorkPm\Task {
 
   public function getMostRecentStatusComment() {
     /* @var $taskCommentsObj avc\ResponseObject */
-    $taskCommentsObj = $this->getCommentsByUser(ADF_USERID);
+    $taskComments = $this->getCommentsByUser(ADF_USERID);
     // loop in REVERSE ORDER since the array is from oldest to newest by default
     // we want NEWEST first 
-    $taskComments = $taskCommentsObj->getData();
+    //$taskComments = $taskCommentsObj->getData();    // Don't have to do this anymore, since we convert to array_values() in getCommentsByUser()
     foreach (array_reverse($taskComments) as $comment) {
       if (contains($comment->body, "Status requested")) {
         return $comment;
@@ -234,32 +242,120 @@ class Task extends \TeamWorkPm\Task {
     
   }  
   
-  public function getTaskPriority() {
-    //TODO Finish getTaskPriority - get this from the task Labels
-    return 3; // If label is "RF3" it should return "3"
+// <editor-fold defaultstate="collapsed" desc="Date Methods"> ------------------\\
+
+  public function getStartDate() {
+    if ($this->startDate != null) {
+      return $this->startDate_DT;
+    }
+    // If we don't have a start date, return the creation date
+    return $this->createdOn_DT;
+  }
+
+  public function getStarted($nowDate = null) {    
+    if ($nowDate == null) {
+      $nowDate = new DateTime();
+    }        
+    $startDate = $this->getStartDate();
+    //wdebug("Task.startDate = ", $startDate);
+    // Task is Started if StartDate BEFORE NowDate
+    return ($startDate <= $nowDate);
+  }
+  
+  public function getDueDate() {
+    if ($this->dueDate != null) {
+      return $this->dueDate_DT;
+    }
+    //TODO Need to do something besides return NULL if there is no Due Date!
+    return null;
     
-    if ($this->taskPriority == null) {
-      $newPri = null;      
-      // Prority is equal to highest value of "RF#" entry.
-      foreach ($this->labels as $label) {
-        // The only type of Labels we have so far are RF# entries
-        // If we add any others, we can filter for those, but for now,
-        // this is all we look for.
-        // This allows *other* labels to be added, without causing issues.
-        if (substr($label->text, 0, 2) == "RF") {
-          $i = intval(substr($label->text, 2));
-          if (($newPri == null) || ($i > $newPri)) {
-            $newPri = $i;
+  }
+  
+// </editor-fold> Date Methods -------------------------------------------------\\
+
+  public function getMilestone() {
+    /* @var $avcTaskList \avc\Task_List */
+    // To get the Milestone (if one exists) we need to get the TaskList, then get
+    // the Milestone from that
+    //TODO Add singleton loading to Milestone
+    if ($avcTaskList = $this->getTaskList()) {
+      //wdebug("Tasks.getMilestone avcTaskList = ", $avcTaskList);
+      $avcMilestone = $avcTaskList->getMilestone();      
+      return $avcMilestone;
+    } else {
+      return null;
+    }    
+  }
+  
+  public function getTaskList() {
+    // Task List is stored in:
+    // $this->todoListId = id
+    // $this->todoListName = name
+    //TODO Add singleton loading to TaskList
+    if ($taskListId = $this->todoListId) {
+      //wdebug("Tasks.getTaskList todoListId = ", $taskListId);
+      $avcTaskList = Avc::getTaskList($taskListId);
+      return $avcTaskList;
+    } else {
+      return null;
+    }    
+  }
+  
+  public function getTaskPriority() {
+    /* @var $avcMilestone \avc\Milestone */
+    
+    if ($this->taskPriority == null) {      
+      $rfLevel = self::$rfNone; // same as NONE
+      
+      // Check THIS Tasks Tags
+      if ($tags = $this->tags) {
+        //wdebug("Tasks.getStatusTagLevel. Tags: ", $tags);
+        foreach ($tags as $tag) {
+          $tagName = $tag->name;
+          if (beginsWith($tagName, self::$rfTagPrefix)) {
+            $newLevel = intval(substr($tagName, strlen(self::$rfTagPrefix)));
+            $rfLevel = ($newLevel > $rfLevel) ? $newLevel : $rfLevel;
+          }
+        }      
+      } else {
+        // For some reason, object didn't load tags...this shouldn't ever happen
+        //TODO Load the tags? And start over?
+        //If we do fix this, best way would be to add a getTag() that either
+        // gets the ->tags or loads them, then sets them.
+      }
+      
+      // Check the Tags of Parent Tasks (if it has one)
+      if ($rfLevel == self::$rfNone) {
+        if ($parentTaskAO = $this->parentTask) {
+          if ($parentTaskId = $parentTaskAO->id) {
+            wdebug("Task.getTaskPriority. rfLevel == None. Check Parent Priority. id = ", $parentTaskId);
+            $parentTask = Avc::getTask($parentTaskAO->id);
+            $parentTaskPriority = $parentTask->getTaskPriority();
+            $rfLevel = $parentTaskPriority;
+            wdebug("Task.getTaskPriority. Parent Priority = ", $parentTaskPriority);
           }
         }
       }
-      $this->taskPriority = $newPri;
+      
+      // Check the Tags of Milestone
+      wdebug("Task.getTaskPriority. rfLevel: ", $rfLevel);
+      if ($rfLevel == self::$rfNone) {
+        wdebug("Task.getTaskPriority. rfLevel == None. Check Milestone Priority ", "");
+        if ($avcMilestone = $this->getMilestone()) {
+          $milestonePriority = $avcMilestone->getMilestonePriority();
+          wdebug("Task.getTaskPriority. Milestone Priority =", $milestonePriority);
+          $rfLevel = $milestonePriority;          
+        }        
+      }
+      
+      $this->taskPriority = $rfLevel;
     }
     return $this->taskPriority;    
   }
 
   public function addComment($commentText, $contentType = 'TEXT') {
-    wdebug("Task.addComment", $commentText);
+    //wdebug("Task.addComment", $commentText);
+    wdebug("Task.addComment", substr($commentText, 0, 15));
     
     // $this->responsiblePartyId = "154123,153910"
     // $this->commentFollowerIds = "153910,154123,156830"
@@ -269,7 +365,8 @@ class Task extends \TeamWorkPm\Task {
       //'notify' => $this->commentFollowerIds,
       'notify' => 'all',
       'isprivate' => false,
-      'content-type' => 'TEXT'
+      'content-type' => 'TEXT',
+      //'fireWebhook' => false    // This doens't work
     );
     switch (strtoupper($contentType)) {
       case 'HTML':
@@ -295,18 +392,25 @@ class Task extends \TeamWorkPm\Task {
   public function addReminderComment($contentType = 'text') {
     
     // Due Date Format DDD m/d/yy hh:ss AM, eg: Tue, 11/28/17 3:00 PM
-    $localDueOn = convertDateTimeToLocal($this->dueDate_DT);
+    $localDueOn = null;
+    if ($dueDate = $this->getDueDate()) {
+      $localDueOn = convertDateTimeToLocal($dueDate);
+    }
     switch (strtoupper($contentType)) {
       case 'HTML':
         $commentText = "<b>Status requested for:</b> <br>";
         $commentText .= $this->content . ": <br>";
-        $commentText .= "Due on: " . ($localDueOn->format("D, m/d/y"));        
+        $commentText .= (!is_null($localDueOn)) ? 
+            "Due on: " . ($localDueOn->format("D, m/d/y")) :
+            "";
         break;
       
       default:
         $commentText = "**Status requested for:** \n";
         $commentText .= $this->content . ": \n";
-        $commentText .= "Due on: " . ($localDueOn->format("D, m/d/y"));        
+        $commentText .= (!is_null($localDueOn)) ? 
+            "Due on: " . ($localDueOn->format("D, m/d/y")) :
+            "";
         break;      
     }
     
@@ -320,24 +424,26 @@ class Task extends \TeamWorkPm\Task {
   public function addOverdueComment($contentType = 'text') {
     
     // Due Date Format DDD m/d/yy hh:ss AM, eg: Tue, 11/28/17 3:00 PM
-    $localDueOn = convertDateTimeToLocal($this->dueDate_DT);
-    switch (strtoupper($contentType)) {
-      case 'HTML':
-        $commentText = "<b>!OVERDUE TASK!</b>\n" . 
-        $commentText .= "<b>Status requested for:</b> <br>";
-        $commentText .= $this->content . ": <br>";
-        $commentText .= "Due on: " . ($localDueOn->format("D, m/d/y"));        
-        break;
-      
-      default:
-        $commentText = "**!OVERDUE TASK!**\n" . 
-        $commentText .= "**Status requested for:** \n";
-        $commentText .= $this->content . ": \n";
-        $commentText .= "Due on: " . ($localDueOn->format("D, m/d/y"));        
-        break;      
+    if ($dueDate = $this->getDueDate()) {
+      $localDueOn = convertDateTimeToLocal($dueDate);
+      switch (strtoupper($contentType)) {
+        case 'HTML':
+          $commentText = "<b>!OVERDUE TASK!</b>\n";         
+          $commentText .= "<b>Status requested for:</b> <br>";
+          $commentText .= $this->content . ": <br>";
+          $commentText .= "Due on: " . ($localDueOn->format("D, m/d/y"));        
+          break;
+
+        default:
+          $commentText = "**!OVERDUE TASK!**\n";        
+          $commentText .= "**Status requested for:** \n";
+          $commentText .= $this->content . ": \n";
+          $commentText .= "Due on: " . ($localDueOn->format("D, m/d/y"));        
+          break;      
+      }
+
+      $this->addComment($commentText, $contentType);        
     }
-    
-    $this->addComment($commentText, $contentType);  
   }  
   
   public function addTag($tagName) {
@@ -348,18 +454,19 @@ class Task extends \TeamWorkPm\Task {
         "content" => $tagName,
       )
     );
+    wdebug("addTag id = " . $this->id . "  tagName = ", $tagName);
     $resp = Avc::updateTagsOnResource($resource, $id, $tags);
     return $resp;
   }
   
   public function removeTag($tagName) {
+    $tagsToRemove = [];
     if ($tags = $this->tags) {
-      wdebug("Tasks.removeTag. Tags: ", $tags);
-      $tagsToRemove = [];
+      //wdebug("Tasks.removeTag. Tags: ", $tags);      
       if (beginsWith($tagName, "/") && isRegularExpression($tagName)) {
         $tagNamePattern = $tagName;
       }            
-      foreach ($tags as $tag) {        
+      foreach ($tags as $tag) {
         $existingTagName = $tag->name;
         if ($tagNamePattern) {
           // Test with RegEx
@@ -377,15 +484,13 @@ class Task extends \TeamWorkPm\Task {
       }
     } else {
       // For some reason, object didn't load tags...this shouldn't ever happen
+      //TODO Load the tags? And start over?
     }
     
-    //TODO Finish removeTag - need to add code to remove all Tags found above
-    // Or, just remove them above...probably best to get a list, THEN remove
-    // them with 1 call.
     if ($tagsToRemove) {
       $resource = 'tasks';
       $id = $this->id;
-      $tagNames = implode(",", $tagNames);
+      $tagNames = implode(",", $tagsToRemove);
       $tags = array(
         "tags" => array(
           "content" => $tagNames,
@@ -395,4 +500,159 @@ class Task extends \TeamWorkPm\Task {
     }
   }
   
+  public function getStatusTagLevel() {
+    $statusLevel = 0; // same as NONE
+    if ($tags = $this->tags) {
+      //wdebug("Tasks.getStatusTagLevel. Tags: ", $tags);
+      foreach ($tags as $tag) {
+        $tagName = $tag->name;
+        if (beginsWith($tagName, self::$statusTagPrefix)) {
+          $newLevel = intval(substr($tagName, strlen(self::$statusTagPrefix)));
+          $statusLevel = ($newLevel > $statusLevel) ? $newLevel : $statusLevel;
+        }
+      }      
+    } else {
+      // For some reason, object didn't load tags...this shouldn't ever happen
+      //TODO Load the tags? And start over?
+      //If we do fix this, best way would be to add a getTag() that either
+      // gets the ->tags or loads them, then sets them.
+    }
+    wdebug("Tasks.getStatusTagLevel. statusLevel: ", $statusLevel);
+    return $statusLevel;
+  }
+  
+  /*
+   * Either Adds a Level 1 tag or upgrades it to the next level
+   */
+  public function addStatusTag() {
+    $currentStatusLevel = $this->getStatusTagLevel();
+    $newStatusLevel = $currentStatusLevel + 1;
+    if ($newStatusLevel <= 0) { $newStatusLevel = 1; }
+    if ($newStatusLevel > 3) { $newStatusLevel = 3; }
+    wdebug("addStatusTag id = " . $this->id . 
+        "  currentStatusLevel = " . $currentStatusLevel .
+        "  newStatusLevel = " . $newStatusLevel, "");
+
+    // Only add/remove tags if we NEED to
+    if ($currentStatusLevel != $newStatusLevel) {
+      // Remove existing Status Lavels - if any
+      $this->removeStatusTag();
+
+      // We MUST sleep a bit here. If we don't, the Remove might execute AFTER the
+      // ADD, which means the Tag will NOT get added correctly
+      // 1/2 a sec seems to work fine. Adjust to greater if it stops working.
+      usleep(500000); // sleep for 1/2 sec 
+
+      // Add new one
+      $newStatusTag = self::$statusTagPrefix . $newStatusLevel;
+      $this->addTag($newStatusTag);    
+    }
+  }
+  
+  public function removeStatusTag() {
+    wdebug("removeStatusTag id = " . $this->id, "");
+    $this->removeTag("/" . self::$statusTagPrefix . "/");
+  }
+  
+  
+// <editor-fold defaultstate="collapsed" desc="Polling"> ------------------\\
+
+  public function processPolling($nowDate) {
+    if ($nowDate == null) {
+      $nowDate = new DateTime();     
+    }
+    wdebug("Task.processPolling: Start -------------------------", "");
+    
+    // 2) Calculate MinCommentPeriod        
+    $minCommentPeriod = $this->getMinCommentPeriod();
+
+    //TODO SET THIS BELOW FOR TESTING
+    //$minCommentPeriod = 3; // 3 hrs    
+    wdebug("Task.processPolling", "> minCommentPeriod = " . $minCommentPeriod);
+
+    // 3) Get the most recent comment
+    $comment = $this->getMostRecentResponsibleComment();
+
+    if ($comment != null) {
+      $createdOn = convertDateTimeToLocal($comment->datetime_DT, "UTC");
+      wdebug("Task.processPolling", "> Most Recent Resp. Comment Date = " . $createdOn->format("Y-m-d H:i:s"));
+
+      // 4) Calculate # of Hrs since that comment and Now      
+      $hrsSinceComment = calcHrsSinceLastComment($createdOn, $nowDate);
+      wdebug("Task.processPolling", "> Hrs Since Resp. Comment Date = " . $hrsSinceComment);
+    } else {
+      wdebug("Task.processPolling", "> NO RECENT RESPONSIBLE COMMENT");
+    }
+
+    // 5) Get most recent Reminder
+    $lastReminderComment = $this->getMostRecentStatusComment();
+    if ($lastReminderComment != null) {
+      $lastReminderCreatedOn = convertDateTimeToLocal($lastReminderComment->datetime_DT, 'UTC');
+      wdebug("Task.processPolling", "> Most Recent Status Comment Date = " . $lastReminderCreatedOn->format("Y-m-d H:i:s"));
+
+      $hrsSinceLastReminder = calcHrsBetweenDates($lastReminderCreatedOn, $nowDate);
+      wdebug("Task.processPolling", "> Hrs Since Status Comment Date = " . $hrsSinceLastReminder);
+    } else {
+      wdebug("Task.processPolling", "> NO RECENT STATUS COMMENT");
+    }
+
+    // 6) If Task Started AND No comment at all OR If HrsSinceComment >= MinCommentPeriod - Create Status
+    //TODO Add a check for how MANY Status Requests we have made that have gone unanswered.
+    // Perhaps instead of just checking "do we have a recent reminder" check
+    // how MANY recent reminders we have...if the Resp User has missed the last
+    // 2 reminders, perhaps we need to send more?
+    // 
+    //TODO Add code to check the RMTicket->StartDate. If the date is BEFORE the StartDate
+    // Don't create Reminder Notifications.    
+    $taskStarted = $this->getStarted($nowDate);
+    $noRecentReminder = ($lastReminderComment == null || $hrsSinceLastReminder > 1);
+    $noRecentComment = ($comment == null || $hrsSinceComment >= $minCommentPeriod);
+//$noRecentReminder = true; // for testing - force noRecentReminder
+//$noRecentComment = true; // for testing - force noRecentComment
+    wdebug("Task.processPolling", "> taskStarted = " . $taskStarted);
+    wdebug("Task.processPolling", "> noRecentReminder = " . $noRecentReminder);
+    wdebug("Task.processPolling", "> noRecentComment = " . $noRecentComment);
+
+    if ($taskStarted && $noRecentReminder && $noRecentComment) {
+      // 6a) Create Status depending on Overdue status
+      $dueDate = $this->getDueDate();
+      if (is_null($dueDate) || $nowDate < $dueDate) {
+        // NOT Overdue - Status Reminder
+        wdebug("Task.processPolling", ">+ addReminderComment");
+        $this->addReminderComment('HTML');
+
+        $this->addStatusTag();
+      } else {
+        // OVERDUE - Overdue Notice
+        wdebug("Task.processPolling", ">+ addOverdueComment");
+        $this->addOverdueComment('HTML');
+
+        $this->addStatusTag();
+      }
+    }
+    wdebug("Task.processPolling: End -------------------------", "");
+    
+  }
+  
+// </editor-fold> Polling -------------------------------------------------\\
+
+  
+// <editor-fold defaultstate="collapsed" desc="Webhook Processing / Events"> ------------------\\
+
+  public function onCommentCreated($wh_data, $comObj) {
+    wdebug("Tasks.onCommentCreated Task: ", $this->content);
+    //wdebug("Tasks.onCommentCreated Comment Body:", substr($comObj->body, 0, 15));
+    
+    // Was comment made by a Responsible User?
+    $respIds = explode(",", $this->responsiblePartyId);   
+    $comCreatedById = $comObj->userId;
+    if (in_array($comCreatedById, $respIds)) {
+      // Yes, Remove any Status Tags
+      wdebug("Tasks.onCommentCreated removeStatusTags: ", $comCreatedById);
+      $this->removeStatusTag();
+    }
+  }
+
+// </editor-fold> Webhook Processing / Events -------------------------------------------------\\
+
 } // Task
